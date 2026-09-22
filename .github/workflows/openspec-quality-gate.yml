@@ -1,0 +1,74 @@
+# reusable workflow。呼び出し側リポジトリの文脈で動くため、kit の導入が前提。
+name: openspec-quality-gate
+
+on:
+  workflow_call:
+    inputs:
+      openspec-version:
+        description: validate に使う OpenSpec のバージョン(スキーマの fork 元に合わせる)
+        type: string
+        default: "1.13.1"
+      working-directory:
+        description: test-command / mutation-command を実行するディレクトリ
+        type: string
+        default: "."
+      test-command:
+        description: Oracle テストを含むテストコマンド。空なら実行しない(既存 CI で走らせている場合)
+        type: string
+        default: ""
+      mutation-command:
+        description: risk_level=high の change を含む PR で実行する Mutation Testing。閾値未満で非ゼロ終了すること
+        type: string
+        default: ""
+    outputs:
+      risk-level:
+        description: PR に含まれる change の最大 risk_level (none|low|medium|high)
+        value: ${{ jobs.quality-gate.outputs.risk-level }}
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    outputs:
+      risk-level: ${{ steps.qe.outputs.risk_level }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Kit installed?
+        run: |
+          if [ ! -f scripts/qe-gate.sh ]; then
+            echo "::error::scripts/qe-gate.sh がありません。npx github:sudabon/openspec_quality_kit で kit を導入してください"
+            exit 1
+          fi
+
+      - name: OpenSpec validate
+        run: npx -y "@fission-ai/openspec@${{ inputs.openspec-version }}" validate --all --strict --no-interactive
+
+      - name: QE gate
+        id: qe
+        run: bash scripts/qe-gate.sh check --base "origin/${{ github.base_ref }}"
+
+      - name: Tests
+        if: inputs.test-command != ''
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          TEST_COMMAND: ${{ inputs.test-command }}
+        run: bash -c "$TEST_COMMAND"
+
+      # high の change を含むのに mutation-command が未指定なら失敗させる(fail closed)
+      - name: Mutation testing (risk_level=high)
+        if: steps.qe.outputs.risk_level == 'high'
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          MUTATION_COMMAND: ${{ inputs.mutation-command }}
+        run: |
+          if [ -z "$MUTATION_COMMAND" ]; then
+            echo "::error::risk_level=high の change が含まれています。mutation-command を指定してください"
+            exit 1
+          fi
+          bash -c "$MUTATION_COMMAND"

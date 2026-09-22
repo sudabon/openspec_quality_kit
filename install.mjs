@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, existsSy
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
+import { execFileSync } from 'node:child_process';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PAYLOAD = join(HERE, 'payload');
@@ -89,11 +90,32 @@ function isInsideGitRepo(dir) {
 
 function applyExecBit(src, dest) {
   try {
+    // .sh は payload 側のファイルモード(zip 展開や git 設定で落ちることがある)に頼らず実行可能にする
+    if (dest.endsWith('.sh')) { chmodSync(dest, 0o755); return; }
     const mode = statSync(src).mode;
     if (mode & 0o111) chmodSync(dest, mode & 0o777);
   } catch {
     /* 実行ビットの引き継ぎに失敗しても致命的ではない */
   }
+}
+
+/**
+ * target で git に無視されるパスを {path, rule} で返す。
+ * git が無い・リポジトリでない場合は空配列(警告を出さないだけで導入は続ける)。
+ */
+function gitIgnored(target, rels) {
+  if (!rels.length) return [];
+  let out = '';
+  try {
+    out = execFileSync('git', ['-C', target, 'check-ignore', '-v', '--', ...rels],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch (err) {
+    out = typeof err.stdout === 'string' ? err.stdout : ''; // exit 1 = どれも無視されていない
+  }
+  return out.split('\n').filter(Boolean).map(line => {
+    const [rule, path] = line.split('\t');
+    return { path, rule };
+  });
 }
 
 // ---------------------------------------------------------------- unified diff
@@ -276,6 +298,20 @@ async function main() {
       console.log(`\n差分あり(上書きしません): ${rel}`);
       console.log(unifiedDiff(existing.toString('utf8'), content.toString('utf8'), `target/${rel}`, `payload/${rel}`));
     }
+  }
+
+  // 2b. 配布物が導入先の .gitignore で無視されていないか(チームに共有されなくなる)
+  const ignored = opts.dryRun ? [] : gitIgnored(opts.target, walkFiles(PAYLOAD));
+  if (ignored.length) {
+    const lines = ignored.map(i => `    ${i.path}  (${i.rule})`);
+    let hint = '  .gitignore を見直してください。';
+    if (ignored.some(i => i.path.startsWith('.claude/'))) {
+      hint = '  .claude/ を丸ごと無視していると、!.claude/agents/ を足しても効きません(親ディレクトリごと除外されるため)。\n' +
+        '  次のように書き換えると、.claude/agents/ だけを共有し、それ以外は無視したままにできます:\n' +
+        '    /.claude/*\n' +
+        '    !/.claude/agents/';
+    }
+    warnings.push(`以下の kit のファイルが .gitignore で無視されています(git に載らず、チームで共有されません):\n${lines.join('\n')}\n${hint}`);
   }
 
   // 3. openspec/config.yaml のマージ

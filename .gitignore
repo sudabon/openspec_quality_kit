@@ -8,12 +8,17 @@
 .uv-cache/
 
 # CodingAgent
-.cursor/
-.claude/
-.codex/
-.agents/
+# ルート固定にする(先頭の / が無いと payload/.claude/ などの配布物まで無視される)
+/.cursor/
+/.claude/
+/.codex/
+/.agents/
 
 # Cursor
 .cursorrules
 .cursorignore
 .cursorindexingignore
+
+# Node
+node_modules/
+*.tgz

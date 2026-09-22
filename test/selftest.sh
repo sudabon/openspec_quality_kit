@@ -126,6 +126,18 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+step "(h) 導入先の .gitignore で kit のファイルが無視される場合"
+ign="$(new_repo ignored)"
+printf '.claude/\n' > "$ign/.gitignore"
+out="$(install_kit --target "$ign")"
+echo "$out" | grep -q '.claude/agents/qe-falsifier.md' && ok ".claude/ を無視していると警告する" || ng "無視の警告がない"
+echo "$out" | grep -q '!/.claude/agents/' && ok "有効な書き換え例(/.claude/* + !/.claude/agents/)を示す" || ng "書き換え例がない"
+printf '/.claude/*\n!/.claude/agents/\n' > "$ign/.gitignore"
+out="$(install_kit --target "$ign" update)"
+echo "$out" | grep -q 'gitignore で無視されています' && ng "修正後も警告が出る" || ok "書き換え後は警告しない"
+git -C "$ign" check-ignore -q .claude/agents/qe-falsifier.md && ng "書き換え後も agents が無視される" || ok "書き換え後は .claude/agents/ が git に載る"
+
+# ---------------------------------------------------------------------------
 echo
 echo "結果: pass $pass / fail $fail / skip $skipped"
 [[ $fail -eq 0 ]]

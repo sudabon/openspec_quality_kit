@@ -68,6 +68,14 @@ kit の最新版に戻したい場合は削除してから再実行する。
 | `openspec/config.yaml` | `schema: quality-driven` の設定(新規作成時は `--language` の context も) |
 | `.openspec-quality-kit.json` | 導入した kit のバージョンと導入時刻 |
 
+導入先の `.gitignore` で kit のファイルが無視される場合は警告を出す。特に `.claude/` を丸ごと無視していると
+サブエージェントがチームに共有されない。`!.claude/agents/` を足すだけでは効かない(親ディレクトリごと除外されるため)ので、次のように書き換える。
+
+```gitignore
+/.claude/*
+!/.claude/agents/
+```
+
 `openspec/config.yaml` の `context` には触らない。品質ルールはスキーマの instruction が持つので、
 他の kit が context にマーカーブロックを持っていても衝突しない。
 
