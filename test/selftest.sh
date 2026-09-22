@@ -16,6 +16,33 @@ install_kit() { node "$KIT/install.mjs" "$@" 2>&1; }
 new_repo() { local d="$ROOT/$1"; mkdir -p "$d"; git -C "$d" init -q; echo "$d"; }
 commit_all() { git -C "$1" add -A && git -C "$1" -c user.email=t@t -c user.name=t commit -qm "$2" --allow-empty; }
 
+# ver_lt A B: A < B なら真(x.y.z のみ比較。-beta などの接尾辞は無視。bash 3.2 互換)
+ver_lt() {
+  local IFS=. i x y; local -a a b
+  a=(${1%%-*}); b=(${2%%-*})
+  for i in 0 1 2; do
+    x=${a[i]:-0}; y=${b[i]:-0}
+    (( x < y )) && return 0
+    (( x > y )) && return 1
+  done
+  return 1
+}
+
+# OpenSpec のバージョン差を吸収する(--no-animation は 1.7.0+、--language は 1.10.0+)
+FORK_BASE="1.13.1"
+INIT_FLAGS=(--tools claude)
+INIT_HAS_LANGUAGE=0
+if has_openspec; then
+  OPENSPEC_VERSION="$(openspec --version 2>/dev/null | tr -d '[:space:]')"
+  init_help="$(openspec init --help 2>&1)"
+  grep -q -- '--no-animation' <<<"$init_help" && INIT_FLAGS+=(--no-animation)
+  grep -q -- '--language' <<<"$init_help" && INIT_HAS_LANGUAGE=1
+  echo "openspec $OPENSPEC_VERSION(スキーマの fork 元: $FORK_BASE)"
+  if ver_lt "$OPENSPEC_VERSION" "$FORK_BASE"; then
+    echo "  ! fork 元より古い OpenSpec です。npm i -g @fission-ai/openspec@latest を推奨します"
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 step "(a) openspec init より前に導入する"
 pre="$(new_repo pre)"
@@ -26,10 +53,15 @@ echo "$out" | grep -q 'openspec init --tools' && ok "未初期化を検出し、
 [[ -x "$pre/scripts/qe-gate.sh" ]] && ok "qe-gate.sh に実行ビット" || ng "qe-gate.sh が実行可能でない"
 
 if has_openspec; then
-  init_out="$(cd "$pre" && openspec init --tools claude --no-animation . 2>&1)"; rc=$?
-  [[ $rc -eq 0 ]] && ok "導入後の openspec init(--language なし)が成功" || ng "openspec init 失敗: $init_out"
-  grep -q '^schema: quality-driven' "$pre/openspec/config.yaml" && grep -q 'Language: Japanese' "$pre/openspec/config.yaml" \
-    && ok "init 後も config.yaml が保持される" || ng "init が config.yaml を書き換えた"
+  init_out="$(cd "$pre" && openspec init "${INIT_FLAGS[@]}" . 2>&1)"; rc=$?
+  if [[ $rc -eq 0 ]]; then
+    ok "導入後の openspec init(--language なし)が成功"
+    grep -q '^schema: quality-driven' "$pre/openspec/config.yaml" && grep -q 'Language: Japanese' "$pre/openspec/config.yaml" \
+      && ok "init 後も config.yaml が保持される" || ng "init が config.yaml を書き換えた"
+  else
+    ng "openspec init 失敗: $init_out"
+    skip "init 失敗のため config.yaml 保持の検証を省略"
+  fi
   (cd "$pre" && openspec schema validate quality-driven >/dev/null 2>&1) && ok "openspec schema validate quality-driven" || ng "schema validate 失敗"
   (cd "$pre" && openspec new change demo >/dev/null 2>&1)
   st="$(cd "$pre" && openspec status --change demo 2>&1)"
@@ -49,7 +81,13 @@ fi
 step "(b) openspec init の後に導入する"
 post="$(new_repo post)"
 if has_openspec; then
-  (cd "$post" && openspec init --tools claude --language Japanese --no-animation . >/dev/null 2>&1)
+  if [[ $INIT_HAS_LANGUAGE -eq 1 ]]; then
+    (cd "$post" && openspec init "${INIT_FLAGS[@]}" --language Japanese . >/dev/null 2>&1)
+  else
+    (cd "$post" && openspec init "${INIT_FLAGS[@]}" . >/dev/null 2>&1)
+    printf '\ncontext: |\n  Language: Japanese\n' >> "$post/openspec/config.yaml"   # init --language 相当を手で書く
+  fi
+  [[ -d "$post/openspec/specs" ]] || ng "openspec init が失敗した(以降の (b) は不正確)"
   out="$(install_kit --target "$post")"
   grep -q '^schema: quality-driven' "$post/openspec/config.yaml" && ok "schema: spec-driven → quality-driven に切り替え" || ng "schema が切り替わらない"
   grep -q 'Language: Japanese' "$post/openspec/config.yaml" && ok "init が書いた context を保持" || ng "context が消えた"
@@ -117,7 +155,7 @@ if has_openspec; then
   gate check >/dev/null && ok "元に戻すと通る" || ng "復元後も落ちる"
 
   commit_all "$g" wip; base="$(git -C "$g" rev-parse HEAD)"
-  A="$g/openspec/changes/archive/2026-01-01-demo"; cp -r "$C" "$A"; commit_all "$g" archive
+  A="$g/openspec/changes/archive/2026-01-01-demo"; mkdir -p "$(dirname "$A")"; cp -r "$C" "$A"; commit_all "$g" archive
   gate check --base "$base" >/dev/null && ng "evidence.md なしのアーカイブを通した" || ok "evidence.md なしのアーカイブ → ブロック"
   printf '# Evidence\n| R1 | F1 | O1 | dedup.test.ts | pass |\n' > "$A/evidence.md"
   gate check --base "$base" >/dev/null && ok "全 Risk ID の証跡があれば通る" || ng "証跡があるのに落ちた"

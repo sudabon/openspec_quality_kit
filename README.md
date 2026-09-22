@@ -7,6 +7,15 @@ OpenSpec プロジェクトに「正しさの定義 → 独立した検証 → �
 `openspec update` で再生成される `.claude/commands/opsx/` や `.claude/skills/openspec-*` には一切触れないので、
 OpenSpec 本体のアップグレードで設定が飛ぶことがない。
 
+## 動作要件
+
+- Node.js 20 以上
+- OpenSpec 1.13.1 以上(`npm i -g @fission-ai/openspec@latest`)
+
+`quality-driven` は OpenSpec 1.13.1 の `spec-driven` を fork している。instruction がこの版の CLI 機能
+(`skip_specs`、`planningHome` など)を前提にしているため、古い版では Agent が存在しない機能を使おうとしたり、
+CI(1.13.1 で validate)とローカルで結果がずれたりする。インストーラは古い版を検出すると警告を出す。
+
 ## 導入
 
 `openspec init` の前でも後でも導入できる。

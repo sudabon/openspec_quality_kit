@@ -12,6 +12,11 @@ const PAYLOAD = join(HERE, 'payload');
 const STAMP_FILE = '.openspec-quality-kit.json';
 const SCHEMA_NAME = 'quality-driven';
 
+// quality-driven は OpenSpec のこのバージョンの spec-driven を fork している。
+// instruction がこの版の CLI 機能(skip_specs、planningHome など)を前提にしているため、
+// これより古い openspec がローカルにあれば警告する。
+const FORK_BASE = '1.13.1';
+
 // openspec init が書く既定値。これだけは自動で quality-driven に切り替える。
 // 進行中の change は .openspec.yaml に自分のスキーマを記録しているので影響を受けない。
 const REPLACEABLE_SCHEMAS = new Set(['spec-driven']);
@@ -116,6 +121,26 @@ function gitIgnored(target, rels) {
     const [rule, path] = line.split('\t');
     return { path, rule };
   });
+}
+
+/** ローカルの openspec のバージョン。見つからなければ null */
+function localOpenspecVersion() {
+  try {
+    const out = execFileSync('openspec', ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const m = out.match(/\d+\.\d+\.\d+/);
+    return m ? m[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+/** a < b(x.y.z のみ比較) */
+function versionLessThan(a, b) {
+  const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) < (pb[i] ?? 0);
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------- unified diff
@@ -355,6 +380,15 @@ async function main() {
   if (skipped.length) {
     console.log('\n以下のファイルは対象側の内容が異なるため skip しました(上書きするには --force):');
     for (const f of skipped) console.log(`  - ${f}`);
+  }
+  const osVersion = localOpenspecVersion();
+  if (osVersion && versionLessThan(osVersion, FORK_BASE)) {
+    warnings.push(
+      `ローカルの OpenSpec ${osVersion} は、${SCHEMA_NAME} の fork 元 ${FORK_BASE} より古いバージョンです。\n` +
+      '  スキーマの instruction が新しい CLI の機能を前提にしているため、Agent が存在しない機能を使おうとしたり、\n' +
+      '  CI(1.13.1 で validate)とローカルで結果がずれたりします。次でアップデートしてください:\n' +
+      '    npm i -g @fission-ai/openspec@latest'
+    );
   }
   for (const w of warnings) console.log(`\n⚠ ${w}`);
 
