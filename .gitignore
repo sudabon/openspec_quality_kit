@@ -1,0 +1,19 @@
+# MacOS
+**/.DS_Store
+
+# IDE
+.vscode/
+.specstory/
+.senena/
+.uv-cache/
+
+# CodingAgent
+.cursor/
+.claude/
+.codex/
+.agents/
+
+# Cursor
+.cursorrules
+.cursorignore
+.cursorindexingignore
