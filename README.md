@@ -1,0 +1,2 @@
+# quality_driven_openspec
+品質ドリブンOpenSpecカスタムスキーマ
